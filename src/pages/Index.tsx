@@ -73,9 +73,8 @@ const LEADERBOARD_INIT = [
 ];
 
 const CURATORS = [
-  { name: "Алина", role: "Старший куратор", emoji: "👩‍🏫", contact: "@alina_green" },
-  { name: "Максим", role: "Куратор", emoji: "👨‍🎓", contact: "@max_curator" },
-  { name: "Соня", role: "Куратор", emoji: "👩‍🎤", contact: "@sonya_team" },
+  { name: "Яна", role: "Куратор", emoji: "👩‍🏫", contact: "@yanavalishova" },
+  { name: "Камиль", role: "Куратор", emoji: "👨‍🎓", contact: "@KePch1k23" },
 ];
 
 const GALLERY_INIT = [
