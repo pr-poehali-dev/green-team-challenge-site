@@ -16,7 +16,6 @@ def handler(event: dict, context) -> dict:
 
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     cur = conn.cursor()
-
     cur.execute("""
         SELECT t.id, t.name, t.avatar,
                COALESCE(SUM(s.points), 0) AS total_score,

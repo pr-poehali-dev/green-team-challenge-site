@@ -44,7 +44,7 @@ def handler(event: dict, context) -> dict:
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO scores (team_id, task_id, task_title, points, awarded_by, note) VALUES (%s, %s, %s, %s, %s, %s)",
-        (team_id, task_id, task_title, points, awarded_by, note),
+        (team_id, task_id, task_title, points, awarded_by, note)
     )
     conn.commit()
     cur.close()

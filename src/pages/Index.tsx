@@ -1,5 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
+
+const LEADERBOARD_URL = "https://functions.poehali.dev/b79e7e03-4979-408c-bdf2-65dcec1bb4fc";
+const AWARD_URL = "https://functions.poehali.dev/c09e44b5-a81e-4659-a9b8-96907d2ad37f";
 
 const TASKS = [
   {
@@ -104,13 +107,7 @@ const TASKS = [
   },
 ];
 
-const LEADERBOARD_INIT = [
-  { rank: 1, team: "Красные орлы", score: 85, completed: 4, avatar: "🦅" },
-  { rank: 2, team: "Синие волки", score: 70, completed: 3, avatar: "🐺" },
-  { rank: 3, team: "Жёлтые тигры", score: 55, completed: 3, avatar: "🐯" },
-  { rank: 4, team: "Белые медведи", score: 40, completed: 2, avatar: "🐻" },
-  { rank: 5, team: "Фиолетовые совы", score: 25, completed: 1, avatar: "🦉" },
-];
+type TeamEntry = { rank: number; id: number; team: string; avatar: string; score: number; completed: number };
 
 const CURATORS = [
   { name: "Яна", role: "Куратор", emoji: "👩‍🏫", contact: "@yanavalishova" },
@@ -123,16 +120,43 @@ const GALLERY_INIT = [
   { id: 3, team: "Жёлтые тигры", task: "Арт-атака", emoji: "🎨" },
 ];
 
-type Section = "home" | "tasks" | "leaderboard" | "contacts" | "gallery";
+type Section = "home" | "tasks" | "leaderboard" | "contacts" | "gallery" | "curator";
 
 export default function Index() {
   const [active, setActive] = useState<Section>("home");
   const [completedTasks, setCompletedTasks] = useState<number[]>([]);
-  const [leaderboard, setLeaderboard] = useState(LEADERBOARD_INIT);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newEntry, setNewEntry] = useState({ team: "", score: "" });
+  const [leaderboard, setLeaderboard] = useState<TeamEntry[]>([]);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [galleryLink, setGalleryLink] = useState("");
   const [gallerySubmitted, setGallerySubmitted] = useState(false);
+
+  // Панель куратора
+  const [curatorPassword, setCuratorPassword] = useState("");
+  const [curatorAuth, setCuratorAuth] = useState(false);
+  const [curatorAuthError, setCuratorAuthError] = useState("");
+  const [awardForm, setAwardForm] = useState({ team_id: "", task_id: "", points: "", note: "", awarded_by: "Куратор" });
+  const [awardLoading, setAwardLoading] = useState(false);
+  const [awardResult, setAwardResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const fetchLeaderboard = useCallback(async () => {
+    setLeaderboardLoading(true);
+    try {
+      const res = await fetch(LEADERBOARD_URL);
+      const data = await res.json();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      setLeaderboard(parsed.leaderboard || []);
+    } catch {
+      // ignore
+    } finally {
+      setLeaderboardLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchLeaderboard();
+    const interval = setInterval(fetchLeaderboard, 30000);
+    return () => clearInterval(interval);
+  }, [fetchLeaderboard]);
 
   const navItems: { id: Section; label: string; icon: string }[] = [
     { id: "home", label: "Главная", icon: "Home" },
@@ -140,6 +164,7 @@ export default function Index() {
     { id: "leaderboard", label: "Таблица", icon: "Trophy" },
     { id: "gallery", label: "Галерея", icon: "Image" },
     { id: "contacts", label: "Контакты", icon: "Users" },
+    { id: "curator", label: "Куратор", icon: "Shield" },
   ];
 
   const toggleTask = (id: number) => {
@@ -148,18 +173,60 @@ export default function Index() {
     );
   };
 
-  const addLeaderboardEntry = () => {
-    if (!newEntry.team || !newEntry.score) return;
-    const score = parseInt(newEntry.score);
-    const updated = [
-      ...leaderboard,
-      { rank: leaderboard.length + 1, team: newEntry.team, score, completed: Math.floor(score / 15), avatar: "⭐" },
-    ]
-      .sort((a, b) => b.score - a.score)
-      .map((e, i) => ({ ...e, rank: i + 1 }));
-    setLeaderboard(updated);
-    setNewEntry({ team: "", score: "" });
-    setShowAddModal(false);
+  const handleCuratorLogin = async () => {
+    // Проверяем пароль через попытку начислить 0 баллов
+    setCuratorAuthError("");
+    try {
+      const res = await fetch(AWARD_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: curatorPassword, team_id: 1, task_id: 0, task_title: "check", points: 0, awarded_by: "check" }),
+      });
+      const raw = await res.json();
+      const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (res.status === 403 || data.error) {
+        setCuratorAuthError("Неверный пароль");
+      } else {
+        setCuratorAuth(true);
+      }
+    } catch {
+      setCuratorAuthError("Ошибка соединения");
+    }
+  };
+
+  const handleAward = async () => {
+    if (!awardForm.team_id || !awardForm.task_id || !awardForm.points) return;
+    setAwardLoading(true);
+    setAwardResult(null);
+    const task = TASKS.find(t => t.id === parseInt(awardForm.task_id));
+    try {
+      const res = await fetch(AWARD_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          password: curatorPassword,
+          team_id: parseInt(awardForm.team_id),
+          task_id: parseInt(awardForm.task_id),
+          task_title: task?.title || "",
+          points: parseInt(awardForm.points),
+          awarded_by: awardForm.awarded_by,
+          note: awardForm.note,
+        }),
+      });
+      const raw = await res.json();
+      const data = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (data.ok) {
+        setAwardResult({ ok: true, message: data.message });
+        setAwardForm({ ...awardForm, note: "" });
+        fetchLeaderboard();
+      } else {
+        setAwardResult({ ok: false, message: data.error || "Ошибка" });
+      }
+    } catch {
+      setAwardResult({ ok: false, message: "Ошибка соединения" });
+    } finally {
+      setAwardLoading(false);
+    }
   };
 
   const renderRankMedal = (rank: number) => {
@@ -419,17 +486,21 @@ export default function Index() {
               <div>
                 <h2 className="font-russo text-3xl text-foreground">ТАБЛИЦА ЛИДЕРОВ</h2>
                 <p className="font-golos text-muted-foreground text-sm mt-1">
-                  Текущее состояние на {new Date().toLocaleDateString("ru-RU")}
+                  Обновляется в реальном времени
                 </p>
               </div>
               <button
-                onClick={() => setShowAddModal(true)}
-                className="flex items-center gap-2 bg-green-500/10 border border-green-500/30 text-green-400 font-golos text-sm px-4 py-2 rounded-xl hover:bg-green-500/20 transition-all"
+                onClick={fetchLeaderboard}
+                disabled={leaderboardLoading}
+                className="flex items-center gap-2 bg-green-500/10 border border-green-500/30 text-green-400 font-golos text-sm px-4 py-2 rounded-xl hover:bg-green-500/20 transition-all disabled:opacity-50"
               >
-                <Icon name="Plus" size={14} />
-                Добавить
+                <Icon name={leaderboardLoading ? "Loader" : "RefreshCw"} size={14} className={leaderboardLoading ? "animate-spin" : ""} />
+                Обновить
               </button>
             </div>
+            {leaderboard.length === 0 && leaderboardLoading && (
+              <div className="text-center py-12 text-muted-foreground font-golos">Загружаю таблицу...</div>
+            )}
 
             {leaderboard.length >= 3 && (
               <div className="flex items-end justify-center gap-4 pt-4 pb-2 animate-fade-in-up delay-100">
@@ -515,6 +586,146 @@ export default function Index() {
                 })}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ===== ПАНЕЛЬ КУРАТОРА ===== */}
+        {active === "curator" && (
+          <div className="space-y-6 max-w-lg mx-auto">
+            {!curatorAuth ? (
+              <div className="bg-card/60 border border-border/60 rounded-3xl p-8 animate-fade-in-up">
+                <div className="text-center mb-8">
+                  <div className="w-16 h-16 rounded-2xl bg-green-500/15 border border-green-500/30 flex items-center justify-center text-4xl mx-auto mb-4">🛡️</div>
+                  <h2 className="font-russo text-2xl text-foreground">ПАНЕЛЬ КУРАТОРА</h2>
+                  <p className="font-golos text-sm text-muted-foreground mt-2">Только для Яны и Камиля</p>
+                </div>
+                <div className="space-y-4">
+                  <input
+                    type="password"
+                    value={curatorPassword}
+                    onChange={(e) => setCuratorPassword(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleCuratorLogin()}
+                    placeholder="Введи пароль куратора"
+                    className="w-full bg-background/60 border border-border rounded-xl px-4 py-3 font-golos text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-green-500/60 transition-colors"
+                  />
+                  {curatorAuthError && (
+                    <p className="text-red-400 font-golos text-sm text-center">{curatorAuthError}</p>
+                  )}
+                  <button
+                    onClick={handleCuratorLogin}
+                    className="w-full bg-green-500 text-white font-russo text-sm py-3 rounded-xl glow-green hover:bg-green-400 transition-all"
+                  >
+                    ВОЙТИ
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between animate-fade-in-up">
+                  <div>
+                    <h2 className="font-russo text-2xl text-foreground">НАЧИСЛИТЬ БАЛЛЫ</h2>
+                    <p className="font-golos text-sm text-green-400 mt-1">✓ Куратор авторизован</p>
+                  </div>
+                  <button onClick={() => { setCuratorAuth(false); setCuratorPassword(""); }} className="text-muted-foreground hover:text-foreground font-golos text-sm">
+                    Выйти
+                  </button>
+                </div>
+
+                <div className="bg-card/60 border border-border/60 rounded-2xl p-6 space-y-4 animate-fade-in-up">
+                  <div>
+                    <label className="font-golos text-sm text-muted-foreground mb-1.5 block">Команда</label>
+                    <select
+                      value={awardForm.team_id}
+                      onChange={(e) => setAwardForm({ ...awardForm, team_id: e.target.value })}
+                      className="w-full bg-background/60 border border-border rounded-xl px-4 py-3 font-golos text-sm text-foreground focus:outline-none focus:border-green-500/60 transition-colors"
+                    >
+                      <option value="">Выбери команду...</option>
+                      {leaderboard.map((t) => (
+                        <option key={t.id} value={t.id}>{t.avatar} {t.team}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-golos text-sm text-muted-foreground mb-1.5 block">Задание</label>
+                    <select
+                      value={awardForm.task_id}
+                      onChange={(e) => {
+                        const task = TASKS.find(t => t.id === parseInt(e.target.value));
+                        setAwardForm({ ...awardForm, task_id: e.target.value, points: task ? String(task.points) : awardForm.points });
+                      }}
+                      className="w-full bg-background/60 border border-border rounded-xl px-4 py-3 font-golos text-sm text-foreground focus:outline-none focus:border-green-500/60 transition-colors"
+                    >
+                      <option value="">Выбери задание...</option>
+                      {TASKS.map((t) => (
+                        <option key={t.id} value={t.id}>{t.emoji} {t.title} (+{t.points})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-golos text-sm text-muted-foreground mb-1.5 block">Баллы</label>
+                    <input
+                      type="number"
+                      value={awardForm.points}
+                      onChange={(e) => setAwardForm({ ...awardForm, points: e.target.value })}
+                      placeholder="10"
+                      className="w-full bg-background/60 border border-border rounded-xl px-4 py-3 font-golos text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-green-500/60 transition-colors"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-golos text-sm text-muted-foreground mb-1.5 block">Куратор</label>
+                    <select
+                      value={awardForm.awarded_by}
+                      onChange={(e) => setAwardForm({ ...awardForm, awarded_by: e.target.value })}
+                      className="w-full bg-background/60 border border-border rounded-xl px-4 py-3 font-golos text-sm text-foreground focus:outline-none focus:border-green-500/60 transition-colors"
+                    >
+                      <option value="Яна">Яна</option>
+                      <option value="Камиль">Камиль</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-golos text-sm text-muted-foreground mb-1.5 block">Комментарий (необязательно)</label>
+                    <input
+                      type="text"
+                      value={awardForm.note}
+                      onChange={(e) => setAwardForm({ ...awardForm, note: e.target.value })}
+                      placeholder="Например: отличное видео!"
+                      className="w-full bg-background/60 border border-border rounded-xl px-4 py-3 font-golos text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-green-500/60 transition-colors"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleAward}
+                    disabled={awardLoading || !awardForm.team_id || !awardForm.task_id || !awardForm.points}
+                    className="w-full bg-green-500 text-white font-russo text-sm py-3.5 rounded-xl glow-green hover:bg-green-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {awardLoading ? "НАЧИСЛЯЮ..." : "НАЧИСЛИТЬ БАЛЛЫ ⚡"}
+                  </button>
+
+                  {awardResult && (
+                    <div className={`flex items-center gap-2 p-3 rounded-xl animate-fade-in-up ${awardResult.ok ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400"}`}>
+                      <Icon name={awardResult.ok ? "CheckCircle" : "XCircle"} size={16} />
+                      <span className="font-golos text-sm">{awardResult.message}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-card/60 border border-border/60 rounded-2xl p-4 animate-fade-in-up">
+                  <h3 className="font-russo text-sm text-foreground mb-3">ТЕКУЩИЙ СЧЁТ</h3>
+                  <div className="space-y-2">
+                    {leaderboard.map((t) => (
+                      <div key={t.id} className="flex items-center justify-between">
+                        <span className="font-golos text-sm text-foreground">{t.avatar} {t.team}</span>
+                        <span className="font-russo text-green-400">{t.score} pts</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -610,56 +821,6 @@ export default function Index() {
         )}
       </main>
 
-      {/* Модалка добавления в таблицу */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-md p-4">
-          <div className="bg-card border border-border rounded-3xl p-6 w-full max-w-sm animate-bounce-in shadow-2xl">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="font-russo text-lg text-foreground">ДОБАВИТЬ КОМАНДУ</h3>
-              <button onClick={() => setShowAddModal(false)} className="text-muted-foreground hover:text-foreground transition-colors">
-                <Icon name="X" size={20} />
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="font-golos text-sm text-muted-foreground mb-1.5 block">Название команды</label>
-                <input
-                  type="text"
-                  value={newEntry.team}
-                  onChange={(e) => setNewEntry({ ...newEntry, team: e.target.value })}
-                  placeholder="Например: Красные орлы"
-                  className="w-full bg-background/60 border border-border rounded-xl px-4 py-3 font-golos text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-green-500/60 transition-colors"
-                />
-              </div>
-              <div>
-                <label className="font-golos text-sm text-muted-foreground mb-1.5 block">Количество баллов</label>
-                <input
-                  type="number"
-                  value={newEntry.score}
-                  onChange={(e) => setNewEntry({ ...newEntry, score: e.target.value })}
-                  placeholder="0"
-                  min="0"
-                  className="w-full bg-background/60 border border-border rounded-xl px-4 py-3 font-golos text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-green-500/60 transition-colors"
-                />
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button
-                onClick={() => setShowAddModal(false)}
-                className="flex-1 bg-secondary/50 border border-border text-foreground font-golos text-sm py-3 rounded-xl hover:bg-secondary transition-all"
-              >
-                Отмена
-              </button>
-              <button
-                onClick={addLeaderboardEntry}
-                className="flex-1 bg-green-500 text-white font-russo text-sm py-3 rounded-xl glow-green hover:bg-green-400 transition-all"
-              >
-                ДОБАВИТЬ
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <footer className="max-w-5xl mx-auto px-4 py-6 mt-8 border-t border-border/30 flex flex-col sm:flex-row items-center justify-between gap-2 relative z-10">
         <div className="flex items-center gap-2">
