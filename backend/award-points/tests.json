@@ -1,0 +1,13 @@
+{
+  "tests": [
+    {
+      "name": "Wrong password",
+      "method": "POST",
+      "path": "/",
+      "body": {"password": "wrong", "team_id": 1, "task_id": 1, "task_title": "test", "points": 10},
+      "expectedStatus": 403,
+      "expectedBody": {"error": "Неверный пароль"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
